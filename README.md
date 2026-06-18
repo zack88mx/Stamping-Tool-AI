@@ -78,8 +78,8 @@ Scanned image prints can still be uploaded and stored. OCR is not bundled in thi
 
 ## Similarity weights
 
-- Material/material thickness: 20%
-- Part size/die size/STEP-STP 3D size: 20%
+- Material/material thickness: 15%
+- Part size/die size/STEP-STP 3D size: 25%
 - Number of stations: 20%
 - Die type: 15%
 - Customer type: 10%

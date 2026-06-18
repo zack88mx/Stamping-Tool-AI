@@ -6,8 +6,8 @@ from .schemas import QuoteRange, QuoteSearchInput
 
 
 WEIGHTS = {
-    "material_thickness": 20,
-    "part_die_size": 20,
+    "material_thickness": 15,
+    "part_die_size": 25,
     "number_of_stations": 20,
     "die_type": 15,
     "customer_type": 10,
