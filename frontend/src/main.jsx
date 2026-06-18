@@ -274,7 +274,7 @@ function JobsTable({ jobs, search, setSearch, loading, onSearch }) {
                   <td>
                     <div className="file-list">
                       {job.files?.length ? job.files.map((file) => (
-                        <a key={file.id} href={fileUrl(file.stored_filename)} target="_blank" rel="noreferrer">
+                        <a key={file.id} href={file.url || fileUrl(file.stored_filename)} target="_blank" rel="noreferrer">
                           {file.original_filename}
                         </a>
                       )) : "-"}

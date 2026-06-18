@@ -12,6 +12,7 @@ class JobFileRead(BaseModel):
     content_type: str | None
     file_size: int
     uploaded_at: datetime
+    url: str | None = None
 
 
 class AwardedJobBase(BaseModel):

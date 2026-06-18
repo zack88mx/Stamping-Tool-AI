@@ -34,6 +34,38 @@ Then open `http://127.0.0.1:5173`.
 
 If `npm` is not found, install Node.js LTS first, then reopen PowerShell.
 
+## Storage
+
+SQLite is the default database. Local development stores the database at `backend/app.db` and uploaded files at `backend/uploads`.
+
+For deployment, set `DATA_DIR` to a persistent disk path so SQLite survives restarts:
+
+```bash
+DATA_DIR=/var/data/stamping-tool-ai
+```
+
+The app supports local file storage by default:
+
+```bash
+STORAGE_BACKEND=local
+UPLOAD_DIR=/var/data/stamping-tool-ai/uploads
+```
+
+For AWS S3 or Cloudflare R2, use the S3-compatible storage backend:
+
+```bash
+STORAGE_BACKEND=s3
+S3_BUCKET=your-bucket-name
+S3_REGION=auto
+S3_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
+S3_PUBLIC_BASE_URL=https://files.your-domain.com
+S3_KEY_PREFIX=uploads
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key
+```
+
+For AWS S3, omit `S3_ENDPOINT_URL` and set `S3_REGION` to your AWS region. If `S3_PUBLIC_BASE_URL` is not set, the backend returns temporary presigned download URLs.
+
 ## Awarded job fields
 
 The MVP captures customer, industry, part, material, volume/program, die size, press, quoted/awarded pricing, detailed build-hour buckets, costs, margin, notes, lessons learned, and uploaded PDF/image/STEP/STP files.

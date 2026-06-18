@@ -1,18 +1,20 @@
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, or_, text
 from sqlalchemy.orm import Session
 
-from .database import Base, UPLOAD_DIR, engine, get_db
+from .config import STORAGE_BACKEND, UPLOAD_DIR
+from .database import Base, engine, get_db
 from .models import AwardedJob, JobFile
 from .print_features import PrintFeatures, analyze_print_bytes
 from .schemas import AwardedJobRead, PrintAnalysisResult, QuoteSearchInput, QuoteSearchResult, SimilarJob
 from .similarity import score_job, suggested_range
 from .step_features import StepFeatures, extract_step_features
+from .storage import storage
 
 
 ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".step", ".stp"}
@@ -45,7 +47,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+if STORAGE_BACKEND == "local":
+    app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 
 def _optional_float(value: str | None) -> float | None:
@@ -115,12 +118,9 @@ def _save_upload(job: AwardedJob, upload: UploadFile, db: Session) -> JobFile:
     if suffix not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {suffix or original_name}")
 
-    job_dir = UPLOAD_DIR / str(job.id)
-    job_dir.mkdir(parents=True, exist_ok=True)
     stored_name = f"{uuid4().hex}{suffix}"
-    stored_path = job_dir / stored_name
     data = upload.file.read()
-    stored_path.write_bytes(data)
+    stored_filename = storage.save(f"{job.id}/{stored_name}", data, upload.content_type)
     if suffix in {".step", ".stp"}:
         _apply_step_features(job, extract_step_features(data))
     if suffix in {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif"}:
@@ -129,7 +129,7 @@ def _save_upload(job: AwardedJob, upload: UploadFile, db: Session) -> JobFile:
     file_record = JobFile(
         job_id=job.id,
         original_filename=original_name,
-        stored_filename=f"{job.id}/{stored_name}",
+        stored_filename=stored_filename,
         content_type=upload.content_type,
         file_size=len(data),
     )
@@ -137,7 +137,17 @@ def _save_upload(job: AwardedJob, upload: UploadFile, db: Session) -> JobFile:
     return file_record
 
 
-def _score_jobs(input_data: QuoteSearchInput, db: Session) -> QuoteSearchResult:
+def _job_read(job: AwardedJob, request: Request | None = None) -> AwardedJobRead:
+    payload = AwardedJobRead.model_validate(job)
+    for file in payload.files:
+        url = storage.url_for(file.stored_filename)
+        if request and url.startswith("/"):
+            url = str(request.url_for("uploads", path=file.stored_filename))
+        file.url = url
+    return payload
+
+
+def _score_jobs(input_data: QuoteSearchInput, db: Session, request: Request | None = None) -> QuoteSearchResult:
     jobs = db.query(AwardedJob).all()
     scored = sorted(
         ((job, *score_job(input_data, job)) for job in jobs),
@@ -147,7 +157,7 @@ def _score_jobs(input_data: QuoteSearchInput, db: Session) -> QuoteSearchResult:
     top_matches = scored[:10]
     return QuoteSearchResult(
         results=[
-            SimilarJob(job=AwardedJobRead.model_validate(job), score=score, breakdown=breakdown)
+            SimilarJob(job=_job_read(job, request), score=score, breakdown=breakdown)
             for job, score, breakdown in top_matches
         ],
         suggested_quote_range=suggested_range(top_matches),
@@ -160,7 +170,7 @@ def health():
 
 
 @app.get("/api/jobs", response_model=list[AwardedJobRead])
-def list_jobs(search: str | None = None, db: Session = Depends(get_db)):
+def list_jobs(request: Request, search: str | None = None, db: Session = Depends(get_db)):
     query = db.query(AwardedJob)
     if search:
         pattern = f"%{search}%"
@@ -178,15 +188,15 @@ def list_jobs(search: str | None = None, db: Session = Depends(get_db)):
                 AwardedJob.lessons_learned.ilike(pattern),
             )
         )
-    return query.order_by(AwardedJob.created_at.desc()).all()
+    return [_job_read(job, request) for job in query.order_by(AwardedJob.created_at.desc()).all()]
 
 
 @app.get("/api/jobs/{job_id}", response_model=AwardedJobRead)
-def get_job(job_id: int, db: Session = Depends(get_db)):
+def get_job(job_id: int, request: Request, db: Session = Depends(get_db)):
     job = db.get(AwardedJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    return job
+    return _job_read(job, request)
 
 
 @app.post("/api/prints/analyze", response_model=PrintAnalysisResult)
@@ -200,6 +210,7 @@ async def analyze_print(file: UploadFile = File(...)):
 
 @app.post("/api/jobs", response_model=AwardedJobRead, status_code=201)
 async def create_job(
+    request: Request,
     customer_name: str = Form(...),
     part_number: str = Form(...),
     customer_type: str | None = Form(None),
@@ -274,16 +285,17 @@ async def create_job(
 
     db.commit()
     db.refresh(job)
-    return job
+    return _job_read(job, request)
 
 
 @app.post("/api/quote-search", response_model=QuoteSearchResult)
-def quote_search(input_data: QuoteSearchInput, db: Session = Depends(get_db)):
-    return _score_jobs(input_data, db)
+def quote_search(input_data: QuoteSearchInput, request: Request, db: Session = Depends(get_db)):
+    return _score_jobs(input_data, db, request)
 
 
 @app.post("/api/quote-search/upload", response_model=QuoteSearchResult)
 async def quote_search_upload(
+    request: Request,
     customer_type: str | None = Form(None),
     industry: str | None = Form(None),
     material: str | None = Form(None),
@@ -328,4 +340,4 @@ async def quote_search_upload(
         if suffix in {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif"}:
             _apply_print_features(input_data, analyze_print_bytes(data, suffix))
 
-    return _score_jobs(input_data, db)
+    return _score_jobs(input_data, db, request)
