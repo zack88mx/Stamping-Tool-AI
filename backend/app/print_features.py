@@ -11,8 +11,16 @@ MATERIAL_PATTERNS = [
     re.compile(r"\b(?:STEEL|STAINLESS|ALUMINUM|BRASS|COPPER)\b[ A-Z0-9\-./]*", re.IGNORECASE),
 ]
 THICKNESS_PATTERNS = [
-    re.compile(r"\b(?:THICKNESS|THK|THICK|GAUGE|GAGE)\s*[:\-]?\s*([0-9]*\.?[0-9]+)", re.IGNORECASE),
-    re.compile(r"\b([0-9]*\.?[0-9]+)\s*(?:IN|MM)?\s*(?:THK|THICK)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:MATERIAL\s+)?(?:THICKNESS|THK|THICK)\s*[:=\-]?\s*"
+        r"([0-9]*\.?[0-9]+)\s*(INCHES|INCH|IN|MM|MILLIMETERS|MILLIMETER|\")?\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b([0-9]*\.?[0-9]+)\s*(INCHES|INCH|IN|MM|MILLIMETERS|MILLIMETER|\")?\s*"
+        r"(?:THK|THICK|THICKNESS)\b",
+        re.IGNORECASE,
+    ),
 ]
 TOLERANCE_RE = re.compile(r"(?:\+/\-|\+-|±)\s*([0-9]*\.?[0-9]+)|\b0?\.0{1,4}[0-9]+\b")
 DATUM_RE = re.compile(r"\bDATUM\b|\bDATUMS\b|\b[A-Z]\s*\|\s*[A-Z]\b", re.IGNORECASE)
@@ -99,9 +107,17 @@ def _find_material(text: str) -> str | None:
 
 def _find_thickness(text: str) -> float | None:
     for pattern in THICKNESS_PATTERNS:
-        match = pattern.search(text)
-        if match:
-            return float(match.group(1))
+        for match in pattern.finditer(text):
+            value = float(match.group(1))
+            unit = (match.group(2) or "").lower()
+            if unit in {"mm", "millimeter", "millimeters"}:
+                value = value / 25.4
+            elif value > 1.0:
+                # Sheet metal thickness is stored in inches. Values above 1 without
+                # an explicit mm unit are usually ordinary print dimensions.
+                continue
+            if 0 < value <= 1.0:
+                return round(value, 4)
     return None
 
 
