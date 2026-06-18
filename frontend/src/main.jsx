@@ -7,11 +7,12 @@ import {
   Database,
   FileUp,
   Gauge,
+  RefreshCw,
   Plus,
   Search,
   UploadCloud,
 } from "lucide-react";
-import { analyzePrint, createJob, fetchJobs, fileUrl, quoteSearch, quoteSearchUpload } from "./api";
+import { analyzePrint, createJob, fetchJobs, fileUrl, quoteSearch, quoteSearchUpload, reprocessJob } from "./api";
 import "./styles.css";
 
 const JOB_FIELDS = [
@@ -222,7 +223,19 @@ function JobForm({ onSaved }) {
   );
 }
 
-function JobsTable({ jobs, search, setSearch, loading, onSearch }) {
+function JobsTable({ jobs, search, setSearch, loading, onSearch, onReprocess }) {
+  const [busyJobId, setBusyJobId] = useState(null);
+
+  async function reprocess(jobId) {
+    setBusyJobId(jobId);
+    try {
+      await reprocessJob(jobId);
+      onReprocess();
+    } finally {
+      setBusyJobId(null);
+    }
+  }
+
   return (
     <section className="panel table-panel">
       <div className="toolbar">
@@ -254,13 +267,14 @@ function JobsTable({ jobs, search, setSearch, loading, onSearch }) {
               <th>Awarded</th>
               <th>Build Hours</th>
               <th>Files</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan="8">Loading jobs...</td></tr>
+              <tr><td colSpan="9">Loading jobs...</td></tr>
             ) : jobs.length === 0 ? (
-              <tr><td colSpan="8">No awarded jobs found.</td></tr>
+              <tr><td colSpan="9">No awarded jobs found.</td></tr>
             ) : (
               jobs.map((job) => (
                 <tr key={job.id}>
@@ -279,6 +293,11 @@ function JobsTable({ jobs, search, setSearch, loading, onSearch }) {
                         </a>
                       )) : "-"}
                     </div>
+                  </td>
+                  <td>
+                    <button className="icon-button" type="button" onClick={() => reprocess(job.id)} disabled={busyJobId === job.id} title="Reprocess uploaded files">
+                      <RefreshCw size={16} />
+                    </button>
                   </td>
                 </tr>
               ))
@@ -468,7 +487,7 @@ function App() {
         {active === "jobs" ? (
           <>
             <JobForm onSaved={() => jobsApi.load("")} />
-            <JobsTable {...jobsApi} onSearch={() => jobsApi.load(jobsApi.search)} />
+            <JobsTable {...jobsApi} onSearch={() => jobsApi.load(jobsApi.search)} onReprocess={() => jobsApi.load(jobsApi.search)} />
           </>
         ) : (
           <QuoteSearch />

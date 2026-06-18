@@ -51,6 +51,8 @@ class AwardedJob(Base):
     print_datum_count: Mapped[int | None] = mapped_column(Integer)
     print_tightest_tolerance: Mapped[float | None] = mapped_column(Float)
     print_feature_text: Mapped[str | None] = mapped_column(Text)
+    print_file_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    step_file_hash: Mapped[str | None] = mapped_column(String(64), index=True)
     notes: Mapped[str | None] = mapped_column(Text)
     lessons_learned: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -8,10 +8,11 @@ from .schemas import QuoteRange, QuoteSearchInput
 WEIGHTS = {
     "material_thickness": 15,
     "part_die_size": 25,
-    "number_of_stations": 20,
-    "die_type": 15,
-    "customer_type": 10,
+    "number_of_stations": 15,
+    "die_type": 10,
+    "customer_type": 5,
     "actual_hours": 10,
+    "print_gdt": 15,
     "notes_complexity": 5,
 }
 
@@ -23,7 +24,13 @@ def _text(value: str | None) -> str:
 def _exact_score(a: str | None, b: str | None) -> float:
     if not a or not b:
         return 0.0
-    return 1.0 if _text(a) == _text(b) else 0.0
+    left = _text(a)
+    right = _text(b)
+    if left == right:
+        return 1.0
+    if left in right or right in left:
+        return 0.85
+    return 0.0
 
 
 def _numeric_similarity(target: float | None, candidate: float | None) -> float:
@@ -74,6 +81,8 @@ def _notes_similarity(a: str | None, b: str | None) -> float:
 
 
 def _print_similarity(input_data: QuoteSearchInput, job: AwardedJob) -> float:
+    if input_data.print_file_hash and input_data.print_file_hash == job.print_file_hash:
+        return 1.0
     material_score = _exact_score(input_data.print_material_spec, job.print_material_spec)
     thickness_score = _numeric_similarity(input_data.print_thickness, job.print_thickness)
     gdt_score = _numeric_similarity(input_data.print_gdt_callout_count, job.print_gdt_callout_count)
@@ -110,6 +119,7 @@ def score_job(input_data: QuoteSearchInput, job: AwardedJob) -> tuple[float, dic
         " ".join(filter(None, [job.notes, job.lessons_learned])),
     )
     notes_complexity = _average([note_text_score, _print_similarity(input_data, job)])
+    print_gdt = _print_similarity(input_data, job)
 
     breakdown = {
         "material_thickness": material_thickness * WEIGHTS["material_thickness"],
@@ -124,9 +134,18 @@ def score_job(input_data: QuoteSearchInput, job: AwardedJob) -> tuple[float, dic
         * WEIGHTS["customer_type"],
         "actual_hours": _numeric_similarity(input_data.actual_tool_build_hours, job.actual_tool_build_hours)
         * WEIGHTS["actual_hours"],
+        "print_gdt": print_gdt * WEIGHTS["print_gdt"],
         "notes_complexity": notes_complexity * WEIGHTS["notes_complexity"],
     }
-    return round(sum(breakdown.values()), 2), {k: round(v, 2) for k, v in breakdown.items()}
+    exact_file_boost = 0.0
+    if input_data.print_file_hash and input_data.print_file_hash == job.print_file_hash:
+        exact_file_boost += 50.0
+    if input_data.step_file_hash and input_data.step_file_hash == job.step_file_hash:
+        exact_file_boost += 35.0
+    if exact_file_boost:
+        breakdown["exact_file_match"] = exact_file_boost
+
+    return min(100.0, round(sum(breakdown.values()), 2)), {k: round(v, 2) for k, v in breakdown.items()}
 
 
 def suggested_range(scored_jobs: list[tuple[AwardedJob, float, dict[str, float]]]) -> QuoteRange:

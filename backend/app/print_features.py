@@ -31,6 +31,17 @@ GDT_TERMS = [
     "TOTAL RUNOUT",
     "STRAIGHTNESS",
 ]
+BAD_MATERIAL_VALUES = {
+    "DRAWN BY",
+    "ENGINEER",
+    "SIZE",
+    "SHEET",
+    "SCALE",
+    "DWG",
+    "DWG.",
+    "DWG. NO.",
+    "REV",
+}
 
 
 @dataclass(frozen=True)
@@ -51,6 +62,18 @@ def _clean(value: str | None) -> str | None:
     return cleaned[:120] or None
 
 
+def _valid_material(value: str | None) -> str | None:
+    cleaned = _clean(value)
+    if not cleaned:
+        return None
+    upper = cleaned.upper().strip(" :.-")
+    if upper in BAD_MATERIAL_VALUES:
+        return None
+    if any(label in upper for label in ["DRAWN BY", "ENGINEER", "SHEET OF", "DWG. NO", "SCALE"]):
+        return None
+    return cleaned
+
+
 def _extract_pdf_text(data: bytes) -> str:
     reader = PdfReader(io.BytesIO(data))
     return "\n".join(page.extract_text() or "" for page in reader.pages)
@@ -68,7 +91,9 @@ def _find_material(text: str) -> str | None:
         if match:
             value = match.group(1) if match.lastindex else match.group(0)
             value = re.split(r"\s{2,}|(?:\bTHK\b)|(?:\bTHICKNESS\b)", value, flags=re.IGNORECASE)[0]
-            return _clean(value)
+            material = _valid_material(value)
+            if material:
+                return material
     return None
 
 

@@ -57,6 +57,8 @@ class AwardedJobBase(BaseModel):
     print_datum_count: int | None = None
     print_tightest_tolerance: float | None = None
     print_feature_text: str | None = None
+    print_file_hash: str | None = None
+    step_file_hash: str | None = None
     notes: str | None = None
     lessons_learned: str | None = None
 
@@ -98,6 +100,8 @@ class QuoteSearchInput(BaseModel):
     print_datum_count: int | None = None
     print_tightest_tolerance: float | None = None
     print_feature_text: str | None = None
+    print_file_hash: str | None = None
+    step_file_hash: str | None = None
     notes: str | None = None
     lessons_learned: str | None = None
 

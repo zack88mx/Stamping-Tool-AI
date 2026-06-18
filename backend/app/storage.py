@@ -22,6 +22,10 @@ class Storage(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def read(self, stored_filename: str) -> bytes:
+        raise NotImplementedError
+
+    @abstractmethod
     def url_for(self, stored_filename: str) -> str:
         raise NotImplementedError
 
@@ -36,6 +40,9 @@ class LocalStorage(Storage):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
         return key
+
+    def read(self, stored_filename: str) -> bytes:
+        return (self.upload_dir / stored_filename).read_bytes()
 
     def url_for(self, stored_filename: str) -> str:
         return f"/uploads/{stored_filename}"
@@ -67,6 +74,10 @@ class S3Storage(Storage):
             **extra_args,
         )
         return key
+
+    def read(self, stored_filename: str) -> bytes:
+        response = self.client.get_object(Bucket=self.bucket, Key=self._object_key(stored_filename))
+        return response["Body"].read()
 
     def url_for(self, stored_filename: str) -> str:
         key = self._object_key(stored_filename)

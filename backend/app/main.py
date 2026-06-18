@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 from uuid import uuid4
 
@@ -74,6 +75,10 @@ def _apply_step_features(target: AwardedJob | QuoteSearchInput, features: StepFe
     target.step_point_count = features.point_count
 
 
+def _hash_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
 def _apply_print_features(target: AwardedJob | QuoteSearchInput, features: PrintFeatures | None) -> None:
     if not features:
         return
@@ -88,6 +93,16 @@ def _apply_print_features(target: AwardedJob | QuoteSearchInput, features: Print
         target.material = features.material_spec
     if features.thickness is not None and target.material_thickness is None:
         target.material_thickness = features.thickness
+
+
+def _apply_file_features(target: AwardedJob | QuoteSearchInput, data: bytes, suffix: str) -> None:
+    file_hash = _hash_bytes(data)
+    if suffix in {".step", ".stp"}:
+        target.step_file_hash = file_hash
+        _apply_step_features(target, extract_step_features(data))
+    if suffix in {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+        target.print_file_hash = file_hash
+        _apply_print_features(target, analyze_print_bytes(data, suffix))
 
 
 def _analysis_result(features: PrintFeatures | None) -> PrintAnalysisResult:
@@ -121,10 +136,7 @@ def _save_upload(job: AwardedJob, upload: UploadFile, db: Session) -> JobFile:
     stored_name = f"{uuid4().hex}{suffix}"
     data = upload.file.read()
     stored_filename = storage.save(f"{job.id}/{stored_name}", data, upload.content_type)
-    if suffix in {".step", ".stp"}:
-        _apply_step_features(job, extract_step_features(data))
-    if suffix in {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif"}:
-        _apply_print_features(job, analyze_print_bytes(data, suffix))
+    _apply_file_features(job, data, suffix)
 
     file_record = JobFile(
         job_id=job.id,
@@ -135,6 +147,15 @@ def _save_upload(job: AwardedJob, upload: UploadFile, db: Session) -> JobFile:
     )
     db.add(file_record)
     return file_record
+
+
+def _reprocess_job_files(job: AwardedJob) -> None:
+    for file_record in job.files:
+        suffix = Path(file_record.original_filename or file_record.stored_filename).suffix.lower()
+        if suffix not in ALLOWED_EXTENSIONS:
+            continue
+        data = storage.read(file_record.stored_filename)
+        _apply_file_features(job, data, suffix)
 
 
 def _job_read(job: AwardedJob, request: Request | None = None) -> AwardedJobRead:
@@ -206,6 +227,17 @@ async def analyze_print(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {suffix or file.filename}")
     data = await file.read()
     return _analysis_result(analyze_print_bytes(data, suffix))
+
+
+@app.post("/api/jobs/{job_id}/reprocess", response_model=AwardedJobRead)
+def reprocess_job(job_id: int, request: Request, db: Session = Depends(get_db)):
+    job = db.get(AwardedJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    _reprocess_job_files(job)
+    db.commit()
+    db.refresh(job)
+    return _job_read(job, request)
 
 
 @app.post("/api/jobs", response_model=AwardedJobRead, status_code=201)
@@ -335,9 +367,6 @@ async def quote_search_upload(
         if suffix not in ALLOWED_EXTENSIONS:
             raise HTTPException(status_code=400, detail=f"Unsupported file type: {suffix or upload.filename}")
         data = await upload.read()
-        if suffix in {".step", ".stp"}:
-            _apply_step_features(input_data, extract_step_features(data))
-        if suffix in {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif"}:
-            _apply_print_features(input_data, analyze_print_bytes(data, suffix))
+        _apply_file_features(input_data, data, suffix)
 
     return _score_jobs(input_data, db, request)

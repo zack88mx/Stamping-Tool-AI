@@ -25,6 +25,12 @@ export function createJob(formData) {
   });
 }
 
+export function reprocessJob(jobId) {
+  return request(`/api/jobs/${jobId}/reprocess`, {
+    method: "POST",
+  });
+}
+
 export function quoteSearch(payload) {
   return request("/api/quote-search", {
     method: "POST",
