@@ -11,7 +11,7 @@ import {
   Search,
   UploadCloud,
 } from "lucide-react";
-import { createJob, fetchJobs, fileUrl, quoteSearch, quoteSearchUpload } from "./api";
+import { analyzePrint, createJob, fetchJobs, fileUrl, quoteSearch, quoteSearchUpload } from "./api";
 import "./styles.css";
 
 const JOB_FIELDS = [
@@ -84,6 +84,14 @@ function stepSize(job) {
   return `3D ${job.step_bbox_length} x ${job.step_bbox_width} x ${job.step_bbox_height}`;
 }
 
+function printSummary(job) {
+  const pieces = [];
+  if (job.print_gdt_callout_count) pieces.push(`${job.print_gdt_callout_count} GD&T`);
+  if (job.print_tolerance_count) pieces.push(`${job.print_tolerance_count} tolerances`);
+  if (job.print_tightest_tolerance) pieces.push(`tightest ${job.print_tightest_tolerance}`);
+  return pieces.join(", ");
+}
+
 function useJobs() {
   const [jobs, setJobs] = useState([]);
   const [search, setSearch] = useState("");
@@ -128,6 +136,7 @@ function JobForm({ onSaved }) {
   const [form, setForm] = useState(blankJob);
   const [files, setFiles] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const [message, setMessage] = useState("");
 
   function update(name, value) {
@@ -154,6 +163,32 @@ function JobForm({ onSaved }) {
     }
   }
 
+  async function chooseFiles(fileList) {
+    const selected = Array.from(fileList || []);
+    setFiles(selected);
+    const print = selected.find((file) => /\.(pdf|png|jpe?g|webp|gif)$/i.test(file.name));
+    if (!print) return;
+    setAnalyzing(true);
+    try {
+      const analysis = await analyzePrint(print);
+      setForm((current) => ({
+        ...current,
+        material: current.material || analysis.material || "",
+        material_thickness: current.material_thickness || analysis.material_thickness || "",
+        notes: current.notes || printSummary({
+          print_gdt_callout_count: analysis.gdt_callout_count,
+          print_tolerance_count: analysis.tolerance_count,
+          print_tightest_tolerance: analysis.tightest_tolerance,
+        }),
+      }));
+      setMessage(analysis.material || analysis.material_thickness ? "Print analyzed and material fields filled." : "Print analyzed. No material text found.");
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
   return (
     <form className="panel form-panel" onSubmit={submit}>
       <div className="panel-title">
@@ -172,7 +207,7 @@ function JobForm({ onSaved }) {
           type="file"
           multiple
           accept=".pdf,image/*,.step,.stp"
-          onChange={(event) => setFiles(Array.from(event.target.files || []))}
+          onChange={(event) => chooseFiles(event.target.files)}
         />
       </label>
       <div className="actions">
@@ -180,6 +215,7 @@ function JobForm({ onSaved }) {
           <FileUp size={18} />
           {saving ? "Saving" : "Save job"}
         </button>
+        {analyzing && <span className="status">Analyzing print</span>}
         {message && <span className="status">{message}</span>}
       </div>
     </form>
@@ -230,7 +266,7 @@ function JobsTable({ jobs, search, setSearch, loading, onSearch }) {
                 <tr key={job.id}>
                   <td><strong>{job.customer_name}</strong><small>{[job.customer_type, job.industry].filter(Boolean).join(" / ") || "-"}</small></td>
                   <td>{job.part_number}<small>{job.part_description || ""}</small></td>
-                  <td>{job.material || "-"}<small>{job.material_thickness ? `${job.material_thickness} thick` : ""}</small></td>
+                  <td>{job.material || job.print_material_spec || "-"}<small>{job.material_thickness || job.print_thickness ? `${job.material_thickness || job.print_thickness} thick` : printSummary(job)}</small></td>
                   <td>{job.die_type || "-"}<small>{stepSize(job) || [job.die_length, job.die_width, job.die_height].filter(Boolean).join(" x ")}</small></td>
                   <td>{job.number_of_stations ?? "-"}</td>
                   <td>{money(job.awarded_price)}</td>
@@ -259,6 +295,7 @@ function QuoteSearch() {
   const [files, setFiles] = useState([]);
   const [result, setResult] = useState(null);
   const [running, setRunning] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState("");
 
   function update(name, value) {
@@ -286,6 +323,31 @@ function QuoteSearch() {
     }
   }
 
+  async function chooseFiles(fileList) {
+    const selected = Array.from(fileList || []);
+    setFiles(selected);
+    const print = selected.find((file) => /\.(pdf|png|jpe?g|webp|gif)$/i.test(file.name));
+    if (!print) return;
+    setAnalyzing(true);
+    try {
+      const analysis = await analyzePrint(print);
+      setForm((current) => ({
+        ...current,
+        material: current.material || analysis.material || "",
+        material_thickness: current.material_thickness || analysis.material_thickness || "",
+        notes: current.notes || printSummary({
+          print_gdt_callout_count: analysis.gdt_callout_count,
+          print_tolerance_count: analysis.tolerance_count,
+          print_tightest_tolerance: analysis.tightest_tolerance,
+        }),
+      }));
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
   const range = result?.suggested_quote_range;
 
   return (
@@ -307,7 +369,7 @@ function QuoteSearch() {
             type="file"
             multiple
             accept=".pdf,image/*,.step,.stp"
-            onChange={(event) => setFiles(Array.from(event.target.files || []))}
+            onChange={(event) => chooseFiles(event.target.files)}
           />
         </label>
         <div className="actions">
@@ -315,6 +377,7 @@ function QuoteSearch() {
             <Gauge size={18} />
             {running ? "Scoring" : "Find matches"}
           </button>
+          {analyzing && <span className="status">Analyzing print</span>}
           {error && <span className="status error">{error}</span>}
         </div>
       </form>
@@ -344,7 +407,7 @@ function QuoteSearch() {
               <article className="match-card" key={job.id}>
                 <div>
                   <h3>{job.part_number}</h3>
-                  <p>{job.customer_name} - {job.material || "Material open"} - {stepSize(job) || job.die_type || "Die type open"}</p>
+                  <p>{job.customer_name} - {job.material || job.print_material_spec || "Material open"} - {stepSize(job) || printSummary(job) || job.die_type || "Die type open"}</p>
                 </div>
                 <div className="match-score">{score}%</div>
                 <div className="breakdown">

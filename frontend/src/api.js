@@ -39,3 +39,12 @@ export function quoteSearchUpload(formData) {
     body: formData,
   });
 }
+
+export function analyzePrint(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return request("/api/prints/analyze", {
+    method: "POST",
+    body: formData,
+  });
+}

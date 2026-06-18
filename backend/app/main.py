@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 
 from .database import Base, UPLOAD_DIR, engine, get_db
 from .models import AwardedJob, JobFile
-from .schemas import AwardedJobRead, QuoteSearchInput, QuoteSearchResult, SimilarJob
+from .print_features import PrintFeatures, analyze_print_bytes
+from .schemas import AwardedJobRead, PrintAnalysisResult, QuoteSearchInput, QuoteSearchResult, SimilarJob
 from .similarity import score_job, suggested_range
 from .step_features import StepFeatures, extract_step_features
 
@@ -70,6 +71,44 @@ def _apply_step_features(target: AwardedJob | QuoteSearchInput, features: StepFe
     target.step_point_count = features.point_count
 
 
+def _apply_print_features(target: AwardedJob | QuoteSearchInput, features: PrintFeatures | None) -> None:
+    if not features:
+        return
+    target.print_material_spec = features.material_spec
+    target.print_thickness = features.thickness
+    target.print_gdt_callout_count = features.gdt_callout_count
+    target.print_tolerance_count = features.tolerance_count
+    target.print_datum_count = features.datum_count
+    target.print_tightest_tolerance = features.tightest_tolerance
+    target.print_feature_text = features.extracted_text
+    if features.material_spec and not target.material:
+        target.material = features.material_spec
+    if features.thickness is not None and target.material_thickness is None:
+        target.material_thickness = features.thickness
+
+
+def _analysis_result(features: PrintFeatures | None) -> PrintAnalysisResult:
+    if not features:
+        return PrintAnalysisResult(
+            material=None,
+            material_thickness=None,
+            gdt_callout_count=0,
+            tolerance_count=0,
+            datum_count=0,
+            tightest_tolerance=None,
+            extracted_text="",
+        )
+    return PrintAnalysisResult(
+        material=features.material_spec,
+        material_thickness=features.thickness,
+        gdt_callout_count=features.gdt_callout_count,
+        tolerance_count=features.tolerance_count,
+        datum_count=features.datum_count,
+        tightest_tolerance=features.tightest_tolerance,
+        extracted_text=features.extracted_text,
+    )
+
+
 def _save_upload(job: AwardedJob, upload: UploadFile, db: Session) -> JobFile:
     original_name = upload.filename or "upload"
     suffix = Path(original_name).suffix.lower()
@@ -84,6 +123,8 @@ def _save_upload(job: AwardedJob, upload: UploadFile, db: Session) -> JobFile:
     stored_path.write_bytes(data)
     if suffix in {".step", ".stp"}:
         _apply_step_features(job, extract_step_features(data))
+    if suffix in {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+        _apply_print_features(job, analyze_print_bytes(data, suffix))
 
     file_record = JobFile(
         job_id=job.id,
@@ -146,6 +187,15 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+@app.post("/api/prints/analyze", response_model=PrintAnalysisResult)
+async def analyze_print(file: UploadFile = File(...)):
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {suffix or file.filename}")
+    data = await file.read()
+    return _analysis_result(analyze_print_bytes(data, suffix))
 
 
 @app.post("/api/jobs", response_model=AwardedJobRead, status_code=201)
@@ -275,5 +325,7 @@ async def quote_search_upload(
         data = await upload.read()
         if suffix in {".step", ".stp"}:
             _apply_step_features(input_data, extract_step_features(data))
+        if suffix in {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+            _apply_print_features(input_data, analyze_print_bytes(data, suffix))
 
     return _score_jobs(input_data, db)

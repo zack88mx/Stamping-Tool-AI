@@ -49,6 +49,13 @@ class AwardedJobBase(BaseModel):
     step_bbox_volume: float | None = None
     step_bbox_diagonal: float | None = None
     step_point_count: int | None = None
+    print_material_spec: str | None = None
+    print_thickness: float | None = None
+    print_gdt_callout_count: int | None = None
+    print_tolerance_count: int | None = None
+    print_datum_count: int | None = None
+    print_tightest_tolerance: float | None = None
+    print_feature_text: str | None = None
     notes: str | None = None
     lessons_learned: str | None = None
 
@@ -83,8 +90,25 @@ class QuoteSearchInput(BaseModel):
     step_bbox_volume: float | None = None
     step_bbox_diagonal: float | None = None
     step_point_count: int | None = None
+    print_material_spec: str | None = None
+    print_thickness: float | None = None
+    print_gdt_callout_count: int | None = None
+    print_tolerance_count: int | None = None
+    print_datum_count: int | None = None
+    print_tightest_tolerance: float | None = None
+    print_feature_text: str | None = None
     notes: str | None = None
     lessons_learned: str | None = None
+
+
+class PrintAnalysisResult(BaseModel):
+    material: str | None
+    material_thickness: float | None
+    gdt_callout_count: int
+    tolerance_count: int
+    datum_count: int
+    tightest_tolerance: float | None
+    extracted_text: str
 
 
 class SimilarJob(BaseModel):

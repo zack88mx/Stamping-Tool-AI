@@ -73,12 +73,43 @@ def _notes_similarity(a: str | None, b: str | None) -> float:
     return len(left & right) / len(left | right)
 
 
+def _print_similarity(input_data: QuoteSearchInput, job: AwardedJob) -> float:
+    material_score = _exact_score(input_data.print_material_spec, job.print_material_spec)
+    thickness_score = _numeric_similarity(input_data.print_thickness, job.print_thickness)
+    gdt_score = _numeric_similarity(input_data.print_gdt_callout_count, job.print_gdt_callout_count)
+    tolerance_score = _numeric_similarity(input_data.print_tolerance_count, job.print_tolerance_count)
+    datum_score = _numeric_similarity(input_data.print_datum_count, job.print_datum_count)
+    tight_tolerance_score = _numeric_similarity(input_data.print_tightest_tolerance, job.print_tightest_tolerance)
+    text_score = _notes_similarity(input_data.print_feature_text, job.print_feature_text)
+    return _average(
+        [
+            material_score,
+            thickness_score,
+            gdt_score,
+            tolerance_score,
+            datum_score,
+            tight_tolerance_score,
+            text_score,
+        ]
+    )
+
+
 def score_job(input_data: QuoteSearchInput, job: AwardedJob) -> tuple[float, dict[str, float]]:
-    material_score = _exact_score(input_data.material, job.material)
-    thickness_score = _numeric_similarity(input_data.material_thickness, job.material_thickness)
+    input_material = input_data.material or input_data.print_material_spec
+    job_material = job.material or job.print_material_spec
+    input_thickness = input_data.material_thickness or input_data.print_thickness
+    job_thickness = job.material_thickness or job.print_thickness
+    material_score = _exact_score(input_material, job_material)
+    thickness_score = _numeric_similarity(input_thickness, job_thickness)
     material_thickness = _average([material_score, thickness_score])
 
     part_die_size = _size_similarity(input_data, job)
+
+    note_text_score = _notes_similarity(
+        " ".join(filter(None, [input_data.notes, input_data.lessons_learned])),
+        " ".join(filter(None, [job.notes, job.lessons_learned])),
+    )
+    notes_complexity = _average([note_text_score, _print_similarity(input_data, job)])
 
     breakdown = {
         "material_thickness": material_thickness * WEIGHTS["material_thickness"],
@@ -93,11 +124,7 @@ def score_job(input_data: QuoteSearchInput, job: AwardedJob) -> tuple[float, dic
         * WEIGHTS["customer_type"],
         "actual_hours": _numeric_similarity(input_data.actual_tool_build_hours, job.actual_tool_build_hours)
         * WEIGHTS["actual_hours"],
-        "notes_complexity": _notes_similarity(
-            " ".join(filter(None, [input_data.notes, input_data.lessons_learned])),
-            " ".join(filter(None, [job.notes, job.lessons_learned])),
-        )
-        * WEIGHTS["notes_complexity"],
+        "notes_complexity": notes_complexity * WEIGHTS["notes_complexity"],
     }
     return round(sum(breakdown.values()), 2), {k: round(v, 2) for k, v in breakdown.items()}
 
