@@ -49,6 +49,9 @@ BAD_MATERIAL_VALUES = {
     "DWG.",
     "DWG. NO.",
     "REV",
+    "DOWN PAYMENT",
+    "PAYMENT TERMS",
+    "USAGE",
 }
 
 
@@ -77,7 +80,7 @@ def _valid_material(value: str | None) -> str | None:
     upper = cleaned.upper().strip(" :.-")
     if upper in BAD_MATERIAL_VALUES:
         return None
-    if any(label in upper for label in ["DRAWN BY", "ENGINEER", "SHEET OF", "DWG. NO", "SCALE"]):
+    if any(label in upper for label in ["DRAWN BY", "ENGINEER", "SHEET OF", "DWG. NO", "SCALE", "DOWN PAYMENT", "PAYMENT TERMS", "MATERIAL USAGE"]):
         return None
     return cleaned
 

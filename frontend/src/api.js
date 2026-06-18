@@ -25,6 +25,14 @@ export function createJob(formData) {
   });
 }
 
+export function updateJob(jobId, payload) {
+  return request(`/api/jobs/${jobId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 export function reprocessJob(jobId) {
   return request(`/api/jobs/${jobId}/reprocess`, {
     method: "POST",
@@ -50,6 +58,15 @@ export function analyzePrint(file) {
   const formData = new FormData();
   formData.append("file", file);
   return request("/api/prints/analyze", {
+    method: "POST",
+    body: formData,
+  });
+}
+
+export function analyzeQuote(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return request("/api/quotes/analyze", {
     method: "POST",
     body: formData,
   });

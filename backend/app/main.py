@@ -12,7 +12,16 @@ from .config import STORAGE_BACKEND, UPLOAD_DIR
 from .database import Base, engine, get_db
 from .models import AwardedJob, JobFile
 from .print_features import PrintFeatures, analyze_print_bytes
-from .schemas import AwardedJobRead, PrintAnalysisResult, QuoteSearchInput, QuoteSearchResult, SimilarJob
+from .quote_features import QuoteFeatures, analyze_quote_bytes
+from .schemas import (
+    AwardedJobRead,
+    AwardedJobUpdate,
+    PrintAnalysisResult,
+    QuoteAnalysisResult,
+    QuoteSearchInput,
+    QuoteSearchResult,
+    SimilarJob,
+)
 from .similarity import score_job, suggested_range
 from .step_features import StepFeatures, extract_step_features
 from .storage import storage
@@ -95,6 +104,17 @@ def _apply_print_features(target: AwardedJob | QuoteSearchInput, features: Print
         target.material_thickness = features.thickness
 
 
+def _apply_quote_features(target: AwardedJob | QuoteSearchInput, features: QuoteFeatures | None) -> None:
+    if not features:
+        return
+    for field, value in features.fields.items():
+        if not hasattr(target, field):
+            continue
+        current = getattr(target, field)
+        if current in (None, ""):
+            setattr(target, field, value)
+
+
 def _apply_file_features(target: AwardedJob | QuoteSearchInput, data: bytes, suffix: str) -> None:
     file_hash = _hash_bytes(data)
     if suffix in {".step", ".stp"}:
@@ -103,6 +123,8 @@ def _apply_file_features(target: AwardedJob | QuoteSearchInput, data: bytes, suf
     if suffix in {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif"}:
         target.print_file_hash = file_hash
         _apply_print_features(target, analyze_print_bytes(data, suffix))
+    if suffix == ".pdf":
+        _apply_quote_features(target, analyze_quote_bytes(data, suffix))
 
 
 def _analysis_result(features: PrintFeatures | None) -> PrintAnalysisResult:
@@ -125,6 +147,12 @@ def _analysis_result(features: PrintFeatures | None) -> PrintAnalysisResult:
         tightest_tolerance=features.tightest_tolerance,
         extracted_text=features.extracted_text,
     )
+
+
+def _quote_analysis_result(features: QuoteFeatures | None) -> QuoteAnalysisResult:
+    if not features:
+        return QuoteAnalysisResult(fields={}, extracted_text="")
+    return QuoteAnalysisResult(fields=features.fields, extracted_text=features.extracted_text)
 
 
 def _save_upload(job: AwardedJob, upload: UploadFile, db: Session) -> JobFile:
@@ -229,12 +257,35 @@ async def analyze_print(file: UploadFile = File(...)):
     return _analysis_result(analyze_print_bytes(data, suffix))
 
 
+@app.post("/api/quotes/analyze", response_model=QuoteAnalysisResult)
+async def analyze_quote(file: UploadFile = File(...)):
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix != ".pdf":
+        raise HTTPException(status_code=400, detail="Quote extraction currently supports text-based PDF files")
+    data = await file.read()
+    return _quote_analysis_result(analyze_quote_bytes(data, suffix))
+
+
 @app.post("/api/jobs/{job_id}/reprocess", response_model=AwardedJobRead)
 def reprocess_job(job_id: int, request: Request, db: Session = Depends(get_db)):
     job = db.get(AwardedJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     _reprocess_job_files(job)
+    db.commit()
+    db.refresh(job)
+    return _job_read(job, request)
+
+
+@app.put("/api/jobs/{job_id}", response_model=AwardedJobRead)
+def update_job(job_id: int, payload: AwardedJobUpdate, request: Request, db: Session = Depends(get_db)):
+    job = db.get(AwardedJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    updates = payload.model_dump(exclude_unset=True)
+    for field, value in updates.items():
+        if hasattr(job, field):
+            setattr(job, field, value)
     db.commit()
     db.refresh(job)
     return _job_read(job, request)

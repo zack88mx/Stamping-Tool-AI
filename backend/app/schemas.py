@@ -116,6 +116,44 @@ class PrintAnalysisResult(BaseModel):
     extracted_text: str
 
 
+class QuoteAnalysisResult(BaseModel):
+    fields: dict[str, str | int | float]
+    extracted_text: str
+
+
+class AwardedJobUpdate(BaseModel):
+    customer_name: str | None = None
+    customer_type: str | None = None
+    industry: str | None = None
+    part_number: str | None = None
+    part_description: str | None = None
+    material: str | None = None
+    material_thickness: float | None = None
+    annual_volume: int | None = None
+    program_life: float | None = None
+    die_type: str | None = None
+    number_of_stations: int | None = None
+    die_length: float | None = None
+    die_width: float | None = None
+    die_height: float | None = None
+    die_weight: float | None = None
+    press_size: str | None = None
+    quoted_price: float | None = None
+    awarded_price: float | None = None
+    actual_tool_build_hours: float | None = None
+    design_hours: float | None = None
+    cam_hours: float | None = None
+    cnc_hours: float | None = None
+    wire_hours: float | None = None
+    bench_hours: float | None = None
+    tryout_hours: float | None = None
+    outsourced_cost: float | None = None
+    material_cost: float | None = None
+    profit_margin: float | None = None
+    notes: str | None = None
+    lessons_learned: str | None = None
+
+
 class SimilarJob(BaseModel):
     job: AwardedJobRead
     score: float = Field(ge=0, le=100)

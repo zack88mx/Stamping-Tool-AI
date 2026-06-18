@@ -5,6 +5,7 @@ import {
   Calculator,
   ChevronRight,
   Database,
+  Edit3,
   FileUp,
   Gauge,
   RefreshCw,
@@ -12,7 +13,7 @@ import {
   Search,
   UploadCloud,
 } from "lucide-react";
-import { analyzePrint, createJob, fetchJobs, fileUrl, quoteSearch, quoteSearchUpload, reprocessJob } from "./api";
+import { analyzePrint, analyzeQuote, createJob, fetchJobs, fileUrl, quoteSearch, quoteSearchUpload, reprocessJob, updateJob } from "./api";
 import "./styles.css";
 
 const JOB_FIELDS = [
@@ -80,6 +81,14 @@ function valueForApi(name, value) {
   return NUMERIC_FIELDS.has(name) ? Number(value) : value;
 }
 
+function payloadFromForm(form) {
+  return Object.fromEntries(Object.entries(form).map(([key, value]) => [key, valueForApi(key, value)]));
+}
+
+function formFromJob(job) {
+  return Object.fromEntries(JOB_FIELDS.map((field) => [field.name, job?.[field.name] ?? ""]));
+}
+
 function stepSize(job) {
   if (!job.step_bbox_length || !job.step_bbox_width || !job.step_bbox_height) return "";
   return `3D ${job.step_bbox_length} x ${job.step_bbox_width} x ${job.step_bbox_height}`;
@@ -133,12 +142,18 @@ function Field({ field, value, onChange }) {
   );
 }
 
-function JobForm({ onSaved }) {
+function JobForm({ editingJob, onSaved, onCancelEdit }) {
   const [form, setForm] = useState(blankJob);
   const [files, setFiles] = useState([]);
   const [saving, setSaving] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    setForm(editingJob ? formFromJob(editingJob) : blankJob);
+    setFiles([]);
+    setMessage(editingJob ? `Editing ${editingJob.part_number}` : "");
+  }, [editingJob]);
 
   function update(name, value) {
     setForm((current) => ({ ...current, [name]: value }));
@@ -149,13 +164,19 @@ function JobForm({ onSaved }) {
     setSaving(true);
     setMessage("");
     try {
-      const body = new FormData();
-      Object.entries(form).forEach(([key, value]) => body.append(key, value));
-      files.forEach((file) => body.append("files", file));
-      await createJob(body);
-      setForm(blankJob);
-      setFiles([]);
-      setMessage("Awarded job saved.");
+      if (editingJob) {
+        await updateJob(editingJob.id, payloadFromForm(form));
+        setMessage("Awarded job updated.");
+        onCancelEdit();
+      } else {
+        const body = new FormData();
+        Object.entries(form).forEach(([key, value]) => body.append(key, value));
+        files.forEach((file) => body.append("files", file));
+        await createJob(body);
+        setForm(blankJob);
+        setFiles([]);
+        setMessage("Awarded job saved.");
+      }
       onSaved();
     } catch (error) {
       setMessage(error.message);
@@ -168,21 +189,32 @@ function JobForm({ onSaved }) {
     const selected = Array.from(fileList || []);
     setFiles(selected);
     const print = selected.find((file) => /\.(pdf|png|jpe?g|webp|gif)$/i.test(file.name));
+    const quote = selected.find((file) => /\.pdf$/i.test(file.name));
     if (!print) return;
     setAnalyzing(true);
     try {
-      const analysis = await analyzePrint(print);
-      setForm((current) => ({
-        ...current,
-        material: current.material || analysis.material || "",
-        material_thickness: current.material_thickness || analysis.material_thickness || "",
-        notes: current.notes || printSummary({
-          print_gdt_callout_count: analysis.gdt_callout_count,
-          print_tolerance_count: analysis.tolerance_count,
-          print_tightest_tolerance: analysis.tightest_tolerance,
-        }),
-      }));
-      setMessage(analysis.material || analysis.material_thickness ? "Print analyzed and material fields filled." : "Print analyzed. No material text found.");
+      const [printAnalysis, quoteAnalysis] = await Promise.all([
+        analyzePrint(print),
+        quote ? analyzeQuote(quote).catch(() => ({ fields: {} })) : Promise.resolve({ fields: {} }),
+      ]);
+      setForm((current) => {
+        const next = { ...current };
+        Object.entries(quoteAnalysis.fields || {}).forEach(([key, value]) => {
+          if (key in next && (next[key] === "" || next[key] === null || next[key] === undefined)) {
+            next[key] = value;
+          }
+        });
+        next.material = next.material || printAnalysis.material || "";
+        next.material_thickness = next.material_thickness || printAnalysis.material_thickness || "";
+        next.notes = next.notes || printSummary({
+          print_gdt_callout_count: printAnalysis.gdt_callout_count,
+          print_tolerance_count: printAnalysis.tolerance_count,
+          print_tightest_tolerance: printAnalysis.tightest_tolerance,
+        });
+        return next;
+      });
+      const filledCount = Object.keys(quoteAnalysis.fields || {}).length;
+      setMessage(filledCount ? `Quote analyzed and ${filledCount} field(s) filled.` : "Print analyzed.");
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -194,7 +226,7 @@ function JobForm({ onSaved }) {
     <form className="panel form-panel" onSubmit={submit}>
       <div className="panel-title">
         <Plus size={19} />
-        <h2>Add Awarded Job</h2>
+        <h2>{editingJob ? "Edit Awarded Job" : "Add Awarded Job"}</h2>
       </div>
       <div className="form-grid">
         {JOB_FIELDS.map((field) => (
@@ -203,19 +235,21 @@ function JobForm({ onSaved }) {
       </div>
       <label className="dropzone">
         <UploadCloud size={22} />
-        <span>{files.length ? `${files.length} file(s) selected` : "Upload PDF, image, STEP, or STP"}</span>
+        <span>{editingJob ? "Editing fields only; add files from a new job entry" : files.length ? `${files.length} file(s) selected` : "Upload quote PDF, print PDF/image, STEP, or STP"}</span>
         <input
           type="file"
           multiple
           accept=".pdf,image/*,.step,.stp"
+          disabled={Boolean(editingJob)}
           onChange={(event) => chooseFiles(event.target.files)}
         />
       </label>
       <div className="actions">
         <button className="primary" type="submit" disabled={saving}>
           <FileUp size={18} />
-          {saving ? "Saving" : "Save job"}
+          {saving ? "Saving" : editingJob ? "Update job" : "Save job"}
         </button>
+        {editingJob && <button className="secondary" type="button" onClick={onCancelEdit}>Cancel</button>}
         {analyzing && <span className="status">Analyzing print</span>}
         {message && <span className="status">{message}</span>}
       </div>
@@ -223,7 +257,7 @@ function JobForm({ onSaved }) {
   );
 }
 
-function JobsTable({ jobs, search, setSearch, loading, onSearch, onReprocess }) {
+function JobsTable({ jobs, search, setSearch, loading, onSearch, onReprocess, onEdit }) {
   const [busyJobId, setBusyJobId] = useState(null);
 
   async function reprocess(jobId) {
@@ -267,7 +301,7 @@ function JobsTable({ jobs, search, setSearch, loading, onSearch, onReprocess }) 
               <th>Awarded</th>
               <th>Build Hours</th>
               <th>Files</th>
-              <th></th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -295,9 +329,14 @@ function JobsTable({ jobs, search, setSearch, loading, onSearch, onReprocess }) 
                     </div>
                   </td>
                   <td>
+                    <div className="row-actions">
+                    <button className="icon-button" type="button" onClick={() => onEdit(job)} title="Edit job">
+                      <Edit3 size={16} />
+                    </button>
                     <button className="icon-button" type="button" onClick={() => reprocess(job.id)} disabled={busyJobId === job.id} title="Reprocess uploaded files">
                       <RefreshCw size={16} />
                     </button>
+                    </div>
                   </td>
                 </tr>
               ))
@@ -449,6 +488,7 @@ function QuoteSearch() {
 
 function App() {
   const [active, setActive] = useState("jobs");
+  const [editingJob, setEditingJob] = useState(null);
   const jobsApi = useJobs();
   const stats = useMemo(() => {
     const totalAwarded = jobsApi.jobs.reduce((sum, job) => sum + Number(job.awarded_price || 0), 0);
@@ -486,8 +526,16 @@ function App() {
       <section className="content">
         {active === "jobs" ? (
           <>
-            <JobForm onSaved={() => jobsApi.load("")} />
-            <JobsTable {...jobsApi} onSearch={() => jobsApi.load(jobsApi.search)} onReprocess={() => jobsApi.load(jobsApi.search)} />
+            <JobForm editingJob={editingJob} onSaved={() => jobsApi.load("")} onCancelEdit={() => setEditingJob(null)} />
+            <JobsTable
+              {...jobsApi}
+              onSearch={() => jobsApi.load(jobsApi.search)}
+              onReprocess={() => jobsApi.load(jobsApi.search)}
+              onEdit={(job) => {
+                setEditingJob(job);
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+            />
           </>
         ) : (
           <QuoteSearch />

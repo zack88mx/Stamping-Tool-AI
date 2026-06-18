@@ -76,6 +76,7 @@ nav {
 
 nav button,
 .primary,
+.secondary,
 .icon-button {
   border: 0;
   border-radius: 8px;
@@ -217,6 +218,18 @@ textarea {
 .primary:disabled {
   opacity: 0.65;
   cursor: wait;
+}
+
+.secondary {
+  background: #e8edf0;
+  color: #283640;
+  padding: 10px 14px;
+  min-height: 42px;
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
 }
 
 .icon-button {
