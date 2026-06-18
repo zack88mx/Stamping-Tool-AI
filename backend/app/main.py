@@ -11,6 +11,7 @@ from .database import Base, UPLOAD_DIR, engine, get_db
 from .models import AwardedJob, JobFile
 from .schemas import AwardedJobRead, QuoteSearchInput, QuoteSearchResult, SimilarJob
 from .similarity import score_job, suggested_range
+from .step_features import StepFeatures, extract_step_features
 
 
 ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".step", ".stp"}
@@ -58,28 +59,58 @@ def _optional_int(value: str | None) -> int | None:
     return int(value)
 
 
-def _save_upload(job_id: int, upload: UploadFile, db: Session) -> JobFile:
+def _apply_step_features(target: AwardedJob | QuoteSearchInput, features: StepFeatures | None) -> None:
+    if not features:
+        return
+    target.step_bbox_length = features.bbox_length
+    target.step_bbox_width = features.bbox_width
+    target.step_bbox_height = features.bbox_height
+    target.step_bbox_volume = features.bbox_volume
+    target.step_bbox_diagonal = features.bbox_diagonal
+    target.step_point_count = features.point_count
+
+
+def _save_upload(job: AwardedJob, upload: UploadFile, db: Session) -> JobFile:
     original_name = upload.filename or "upload"
     suffix = Path(original_name).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {suffix or original_name}")
 
-    job_dir = UPLOAD_DIR / str(job_id)
+    job_dir = UPLOAD_DIR / str(job.id)
     job_dir.mkdir(parents=True, exist_ok=True)
     stored_name = f"{uuid4().hex}{suffix}"
     stored_path = job_dir / stored_name
     data = upload.file.read()
     stored_path.write_bytes(data)
+    if suffix in {".step", ".stp"}:
+        _apply_step_features(job, extract_step_features(data))
 
     file_record = JobFile(
-        job_id=job_id,
+        job_id=job.id,
         original_filename=original_name,
-        stored_filename=f"{job_id}/{stored_name}",
+        stored_filename=f"{job.id}/{stored_name}",
         content_type=upload.content_type,
         file_size=len(data),
     )
     db.add(file_record)
     return file_record
+
+
+def _score_jobs(input_data: QuoteSearchInput, db: Session) -> QuoteSearchResult:
+    jobs = db.query(AwardedJob).all()
+    scored = sorted(
+        ((job, *score_job(input_data, job)) for job in jobs),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    top_matches = scored[:10]
+    return QuoteSearchResult(
+        results=[
+            SimilarJob(job=AwardedJobRead.model_validate(job), score=score, breakdown=breakdown)
+            for job, score, breakdown in top_matches
+        ],
+        suggested_quote_range=suggested_range(top_matches),
+    )
 
 
 @app.get("/health")
@@ -189,7 +220,7 @@ async def create_job(
 
     for upload in files:
         if upload.filename:
-            _save_upload(job.id, upload, db)
+            _save_upload(job, upload, db)
 
     db.commit()
     db.refresh(job)
@@ -198,17 +229,51 @@ async def create_job(
 
 @app.post("/api/quote-search", response_model=QuoteSearchResult)
 def quote_search(input_data: QuoteSearchInput, db: Session = Depends(get_db)):
-    jobs = db.query(AwardedJob).all()
-    scored = sorted(
-        ((job, *score_job(input_data, job)) for job in jobs),
-        key=lambda item: item[1],
-        reverse=True,
+    return _score_jobs(input_data, db)
+
+
+@app.post("/api/quote-search/upload", response_model=QuoteSearchResult)
+async def quote_search_upload(
+    customer_type: str | None = Form(None),
+    industry: str | None = Form(None),
+    material: str | None = Form(None),
+    material_thickness: str | None = Form(None),
+    annual_volume: str | None = Form(None),
+    actual_tool_build_hours: str | None = Form(None),
+    die_type: str | None = Form(None),
+    number_of_stations: str | None = Form(None),
+    die_length: str | None = Form(None),
+    die_width: str | None = Form(None),
+    die_height: str | None = Form(None),
+    notes: str | None = Form(None),
+    lessons_learned: str | None = Form(None),
+    files: list[UploadFile] = File(default=[]),
+    db: Session = Depends(get_db),
+):
+    input_data = QuoteSearchInput(
+        customer_type=customer_type,
+        industry=industry,
+        material=material,
+        material_thickness=_optional_float(material_thickness),
+        annual_volume=_optional_int(annual_volume),
+        actual_tool_build_hours=_optional_float(actual_tool_build_hours),
+        die_type=die_type,
+        number_of_stations=_optional_int(number_of_stations),
+        die_length=_optional_float(die_length),
+        die_width=_optional_float(die_width),
+        die_height=_optional_float(die_height),
+        notes=notes,
+        lessons_learned=lessons_learned,
     )
-    top_matches = scored[:10]
-    return QuoteSearchResult(
-        results=[
-            SimilarJob(job=AwardedJobRead.model_validate(job), score=score, breakdown=breakdown)
-            for job, score, breakdown in top_matches
-        ],
-        suggested_quote_range=suggested_range(top_matches),
-    )
+
+    for upload in files:
+        if not upload.filename:
+            continue
+        suffix = Path(upload.filename).suffix.lower()
+        if suffix not in ALLOWED_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {suffix or upload.filename}")
+        data = await upload.read()
+        if suffix in {".step", ".stp"}:
+            _apply_step_features(input_data, extract_step_features(data))
+
+    return _score_jobs(input_data, db)

@@ -43,6 +43,12 @@ class AwardedJobBase(BaseModel):
     outsourced_cost: float | None = None
     material_cost: float | None = None
     profit_margin: float | None = None
+    step_bbox_length: float | None = None
+    step_bbox_width: float | None = None
+    step_bbox_height: float | None = None
+    step_bbox_volume: float | None = None
+    step_bbox_diagonal: float | None = None
+    step_point_count: int | None = None
     notes: str | None = None
     lessons_learned: str | None = None
 
@@ -71,6 +77,12 @@ class QuoteSearchInput(BaseModel):
     die_length: float | None = None
     die_width: float | None = None
     die_height: float | None = None
+    step_bbox_length: float | None = None
+    step_bbox_width: float | None = None
+    step_bbox_height: float | None = None
+    step_bbox_volume: float | None = None
+    step_bbox_diagonal: float | None = None
+    step_point_count: int | None = None
     notes: str | None = None
     lessons_learned: str | None = None
 

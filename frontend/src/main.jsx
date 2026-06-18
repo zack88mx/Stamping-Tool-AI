@@ -11,7 +11,7 @@ import {
   Search,
   UploadCloud,
 } from "lucide-react";
-import { createJob, fetchJobs, fileUrl, quoteSearch } from "./api";
+import { createJob, fetchJobs, fileUrl, quoteSearch, quoteSearchUpload } from "./api";
 import "./styles.css";
 
 const JOB_FIELDS = [
@@ -77,6 +77,11 @@ function money(value) {
 function valueForApi(name, value) {
   if (value === "" || value === null || value === undefined) return null;
   return NUMERIC_FIELDS.has(name) ? Number(value) : value;
+}
+
+function stepSize(job) {
+  if (!job.step_bbox_length || !job.step_bbox_width || !job.step_bbox_height) return "";
+  return `3D ${job.step_bbox_length} x ${job.step_bbox_width} x ${job.step_bbox_height}`;
 }
 
 function useJobs() {
@@ -226,7 +231,7 @@ function JobsTable({ jobs, search, setSearch, loading, onSearch }) {
                   <td><strong>{job.customer_name}</strong><small>{[job.customer_type, job.industry].filter(Boolean).join(" / ") || "-"}</small></td>
                   <td>{job.part_number}<small>{job.part_description || ""}</small></td>
                   <td>{job.material || "-"}<small>{job.material_thickness ? `${job.material_thickness} thick` : ""}</small></td>
-                  <td>{job.die_type || "-"}<small>{[job.die_length, job.die_width, job.die_height].filter(Boolean).join(" x ")}</small></td>
+                  <td>{job.die_type || "-"}<small>{stepSize(job) || [job.die_length, job.die_width, job.die_height].filter(Boolean).join(" x ")}</small></td>
                   <td>{job.number_of_stations ?? "-"}</td>
                   <td>{money(job.awarded_price)}</td>
                   <td>{job.actual_tool_build_hours ?? "-"}</td>
@@ -265,8 +270,15 @@ function QuoteSearch() {
     setRunning(true);
     setError("");
     try {
-      const payload = Object.fromEntries(Object.entries(form).map(([key, value]) => [key, valueForApi(key, value)]));
-      setResult(await quoteSearch(payload));
+      if (files.length) {
+        const body = new FormData();
+        Object.entries(form).forEach(([key, value]) => body.append(key, value));
+        files.forEach((file) => body.append("files", file));
+        setResult(await quoteSearchUpload(body));
+      } else {
+        const payload = Object.fromEntries(Object.entries(form).map(([key, value]) => [key, valueForApi(key, value)]));
+        setResult(await quoteSearch(payload));
+      }
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -290,7 +302,7 @@ function QuoteSearch() {
         </div>
         <label className="dropzone">
           <Archive size={21} />
-          <span>{files.length ? files.map((file) => file.name).join(", ") : "Attach new part print or STEP file"}</span>
+          <span>{files.length ? files.map((file) => file.name).join(", ") : "Attach new part print or STEP/STP file"}</span>
           <input
             type="file"
             multiple
@@ -332,7 +344,7 @@ function QuoteSearch() {
               <article className="match-card" key={job.id}>
                 <div>
                   <h3>{job.part_number}</h3>
-                  <p>{job.customer_name} · {job.material || "Material open"} · {job.die_type || "Die type open"}</p>
+                  <p>{job.customer_name} - {job.material || "Material open"} - {stepSize(job) || job.die_type || "Die type open"}</p>
                 </div>
                 <div className="match-score">{score}%</div>
                 <div className="breakdown">

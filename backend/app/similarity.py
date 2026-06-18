@@ -46,6 +46,25 @@ def _die_volume(length: float | None, width: float | None, height: float | None)
     return length * width * height
 
 
+def _size_similarity(input_data: QuoteSearchInput, job: AwardedJob) -> float:
+    step_volume_score = _numeric_similarity(input_data.step_bbox_volume, job.step_bbox_volume)
+    step_diagonal_score = _numeric_similarity(input_data.step_bbox_diagonal, job.step_bbox_diagonal)
+    step_shape_score = _average(
+        [
+            _numeric_similarity(input_data.step_bbox_length, job.step_bbox_length),
+            _numeric_similarity(input_data.step_bbox_width, job.step_bbox_width),
+            _numeric_similarity(input_data.step_bbox_height, job.step_bbox_height),
+        ]
+    )
+    step_score = _average([step_volume_score, step_diagonal_score, step_shape_score])
+    if step_score > 0:
+        return step_score
+
+    target_volume = _die_volume(input_data.die_length, input_data.die_width, input_data.die_height)
+    candidate_volume = _die_volume(job.die_length, job.die_width, job.die_height)
+    return _numeric_similarity(target_volume, candidate_volume)
+
+
 def _notes_similarity(a: str | None, b: str | None) -> float:
     left = set(re.findall(r"[a-z0-9]+", _text(a)))
     right = set(re.findall(r"[a-z0-9]+", _text(b)))
@@ -59,9 +78,7 @@ def score_job(input_data: QuoteSearchInput, job: AwardedJob) -> tuple[float, dic
     thickness_score = _numeric_similarity(input_data.material_thickness, job.material_thickness)
     material_thickness = _average([material_score, thickness_score])
 
-    target_volume = _die_volume(input_data.die_length, input_data.die_width, input_data.die_height)
-    candidate_volume = _die_volume(job.die_length, job.die_width, job.die_height)
-    part_die_size = _numeric_similarity(target_volume, candidate_volume)
+    part_die_size = _size_similarity(input_data, job)
 
     breakdown = {
         "material_thickness": material_thickness * WEIGHTS["material_thickness"],

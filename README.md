@@ -9,6 +9,7 @@ A local MVP for storing awarded stamped-metal jobs and using them to quote simil
 - React + Vite frontend
 - Local file storage in `backend/uploads`
 - Weighted similarity scoring engine
+- STEP/STP 3D bounding-box feature extraction
 
 ## Run locally
 
@@ -36,10 +37,12 @@ If `npm` is not found, install Node.js LTS first, then reopen PowerShell.
 
 The MVP captures customer, industry, part, material, volume/program, die size, press, quoted/awarded pricing, detailed build-hour buckets, costs, margin, notes, lessons learned, and uploaded PDF/image/STEP/STP files.
 
+STEP/STP files are parsed for `CARTESIAN_POINT` coordinates. The app stores a simple 3D bounding box, diagonal, volume, and point count for awarded jobs, then uses those features when a new quote search includes a STEP/STP file.
+
 ## Similarity weights
 
 - Material/material thickness: 20%
-- Part size/die size: 20%
+- Part size/die size/STEP-STP 3D size: 20%
 - Number of stations: 20%
 - Die type: 15%
 - Customer type: 10%

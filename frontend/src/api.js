@@ -32,3 +32,10 @@ export function quoteSearch(payload) {
     body: JSON.stringify(payload),
   });
 }
+
+export function quoteSearchUpload(formData) {
+  return request("/api/quote-search/upload", {
+    method: "POST",
+    body: formData,
+  });
+}
